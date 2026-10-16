@@ -49,6 +49,18 @@ navegador ("Try it out" → "Execute"). La especificación OpenAPI está en `/op
 (fuente: `internal/docs/openapi.yaml`; actualízala al cambiar los endpoints).
 Swagger UI se carga desde el CDN de jsDelivr, así que el navegador necesita internet.
 
+## Postman
+
+La colección `postman/microservicio.postman_collection.json` prueba todo el flujo (health, CRUD,
+paginación, filtro y errores) con verificaciones automáticas.
+
+1. En Postman: **Import** → selecciona el archivo.
+2. Con el servicio en marcha, botón derecho en la colección → **Run collection** → **Run**.
+   Las peticiones se encadenan (el `id` creado se guarda en la variable `productId`), así que
+   ejecútalas en orden. Para otro servidor, cambia la variable `baseUrl` de la colección.
+
+Desde la terminal, con Newman: `npx newman run postman/microservicio.postman_collection.json`
+
 ## Endpoints
 
 | Método | Ruta              | Descripción          |

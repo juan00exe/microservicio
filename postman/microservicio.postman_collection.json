@@ -1,0 +1,308 @@
+{
+  "info": {
+    "name": "Microservicio de productos",
+    "description": "Pruebas de la API de productos. Ejecuta la colección completa en orden con Run collection: cada petición guarda las variables que necesita la siguiente (por ejemplo productId).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "productId", "value": "" },
+    { "key": "suffix", "value": "" }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('Responde en menos de 2 s', () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Estado del servicio",
+          "request": { "method": "GET", "url": "{{baseUrl}}/health" },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status = ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "CRUD de productos",
+      "item": [
+        {
+          "name": "Crear producto",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Sufijo único para que el filtro por nombre solo encuentre los productos de esta ejecución.",
+                  "pm.collectionVariables.set('suffix', Date.now().toString(36));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const p = pm.response.json();",
+                  "pm.test('Devuelve el producto con id', () => {",
+                  "    pm.expect(p.id).to.match(/^[0-9a-f-]{36}$/);",
+                  "    pm.expect(p.name).to.eql('Teclado ' + pm.collectionVariables.get('suffix'));",
+                  "    pm.expect(p.price).to.eql(49.9);",
+                  "    pm.expect(p.stock).to.eql(10);",
+                  "});",
+                  "pm.test('Header Location apunta al producto', () => pm.expect(pm.response.headers.get('Location')).to.eql('/products/' + p.id));",
+                  "pm.collectionVariables.set('productId', p.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/products",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Teclado {{suffix}}\",\n  \"description\": \"Teclado mecánico\",\n  \"price\": 49.9,\n  \"stock\": 10\n}"
+            }
+          }
+        },
+        {
+          "name": "Obtener producto",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Es el producto creado', () => pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('productId')));"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/products/{{productId}}" }
+        },
+        {
+          "name": "Listar productos (paginado)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Formato de página', () => {",
+                  "    pm.expect(body).to.have.keys('items', 'page', 'limit', 'total', 'total_pages');",
+                  "    pm.expect(body.page).to.eql(1);",
+                  "    pm.expect(body.limit).to.eql(5);",
+                  "    pm.expect(body.items.length).to.be.at.most(5);",
+                  "    pm.expect(body.total_pages).to.eql(Math.ceil(body.total / 5));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/products?page=1&limit=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["products"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "5" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Filtrar por nombre",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Encuentra solo el producto creado (sin distinguir mayúsculas)', () => {",
+                  "    pm.expect(body.total).to.eql(1);",
+                  "    pm.expect(body.items[0].id).to.eql(pm.collectionVariables.get('productId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/products?name=TECLADO {{suffix}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["products"],
+              "query": [{ "key": "name", "value": "TECLADO {{suffix}}" }]
+            }
+          }
+        },
+        {
+          "name": "Actualizar producto",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json();",
+                  "pm.test('Campos actualizados', () => {",
+                  "    pm.expect(p.price).to.eql(39.9);",
+                  "    pm.expect(p.stock).to.eql(8);",
+                  "    pm.expect(new Date(p.updated_at) > new Date(p.created_at)).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/products/{{productId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Teclado {{suffix}}\",\n  \"description\": \"Teclado mecánico (oferta)\",\n  \"price\": 39.9,\n  \"stock\": 8\n}"
+            }
+          }
+        },
+        {
+          "name": "Borrar producto",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "DELETE", "url": "{{baseUrl}}/products/{{productId}}" }
+        },
+        {
+          "name": "Obtener producto borrado (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Mensaje de error', () => pm.expect(pm.response.json().error).to.eql('product not found'));"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/products/{{productId}}" }
+        }
+      ]
+    },
+    {
+      "name": "Errores y validaciones",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 400', () => pm.response.to.have.status(400));",
+              "pm.test('Incluye mensaje de error', () => pm.expect(pm.response.json().error).to.be.a('string').and.not.empty);"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "Crear sin nombre",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/products",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"\",\n  \"price\": 10\n}" }
+          }
+        },
+        {
+          "name": "Precio negativo",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/products",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Mouse\",\n  \"price\": -5\n}" }
+          }
+        },
+        {
+          "name": "Campo desconocido",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/products",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Mouse\",\n  \"color\": \"rojo\"\n}" }
+          }
+        },
+        {
+          "name": "JSON mal formado",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/products",
+            "body": { "mode": "raw", "raw": "{\"name\": " }
+          }
+        },
+        {
+          "name": "Limit fuera de rango",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/products?limit=500",
+              "host": ["{{baseUrl}}"],
+              "path": ["products"],
+              "query": [{ "key": "limit", "value": "500" }]
+            }
+          }
+        },
+        {
+          "name": "Page inválida",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/products?page=abc",
+              "host": ["{{baseUrl}}"],
+              "path": ["products"],
+              "query": [{ "key": "page", "value": "abc" }]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
