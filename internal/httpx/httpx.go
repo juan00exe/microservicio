@@ -52,7 +52,7 @@ func Logging(logger *slog.Logger, next http.Handler) http.Handler {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		logger.Info("request",
+		logger.InfoContext(r.Context(), "request",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,
@@ -66,7 +66,7 @@ func Recover(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				logger.Error("panic", "error", err, "path", r.URL.Path)
+				logger.ErrorContext(r.Context(), "panic", "error", err, "path", r.URL.Path)
 				WriteError(w, http.StatusInternalServerError, "internal server error")
 			}
 		}()

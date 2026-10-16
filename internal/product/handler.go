@@ -45,7 +45,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 
 	page, err := h.svc.List(r.Context(), params)
 	if err != nil {
-		h.writeErr(w, err)
+		h.writeErr(w, r, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, page)
@@ -62,7 +62,7 @@ func intParam(s string, def int) (int, error) {
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	p, err := h.svc.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
-		h.writeErr(w, err)
+		h.writeErr(w, r, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, p)
@@ -75,7 +75,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := h.svc.Create(r.Context(), in)
 	if err != nil {
-		h.writeErr(w, err)
+		h.writeErr(w, r, err)
 		return
 	}
 	w.Header().Set("Location", "/products/"+p.ID)
@@ -89,7 +89,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := h.svc.Update(r.Context(), r.PathValue("id"), in)
 	if err != nil {
-		h.writeErr(w, err)
+		h.writeErr(w, r, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, p)
@@ -97,7 +97,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	if err := h.svc.Delete(r.Context(), r.PathValue("id")); err != nil {
-		h.writeErr(w, err)
+		h.writeErr(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -109,14 +109,14 @@ func decodeInput(w http.ResponseWriter, r *http.Request) (Input, bool) {
 	return in, ok
 }
 
-func (h *Handler) writeErr(w http.ResponseWriter, err error) {
+func (h *Handler) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
 		httpx.WriteError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, ErrInvalid):
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 	default:
-		h.logger.Error("unexpected error", "error", err)
+		h.logger.ErrorContext(r.Context(), "unexpected error", "error", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 	}
 }

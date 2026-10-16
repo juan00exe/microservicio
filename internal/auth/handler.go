@@ -36,7 +36,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := h.svc.Register(r.Context(), c)
 	if err != nil {
-		h.writeErr(w, err)
+		h.writeErr(w, r, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusCreated, u)
@@ -49,7 +49,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	tok, err := h.svc.Login(r.Context(), c, clientIP(r))
 	if err != nil {
-		h.writeErr(w, err)
+		h.writeErr(w, r, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -65,7 +65,7 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		h.writeErr(w, err)
+		h.writeErr(w, r, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, u)
@@ -81,7 +81,7 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-func (h *Handler) writeErr(w http.ResponseWriter, err error) {
+func (h *Handler) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	if tooMany, ok := errors.AsType[*TooManyAttemptsError](err); ok {
 		secs := int(math.Ceil(tooMany.RetryAfter.Seconds()))
 		w.Header().Set("Retry-After", strconv.Itoa(secs))
@@ -96,7 +96,7 @@ func (h *Handler) writeErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrInvalidCredentials):
 		unauthorized(w, err.Error())
 	default:
-		h.logger.Error("unexpected error", "error", err)
+		h.logger.ErrorContext(r.Context(), "unexpected error", "error", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 	}
 }

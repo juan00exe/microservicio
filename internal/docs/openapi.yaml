@@ -6,6 +6,9 @@ info:
 
     Las lecturas son públicas. Para crear, editar o borrar productos hace falta un token de **admin**:
     haz login en `POST /auth/login`, copia `access_token` y pégalo en **Authorize**.
+
+    Todas las respuestas incluyen la cabecera `X-Request-ID` (se reutiliza la que envíe el cliente
+    si es válida). Inclúyela al reportar un error: aparece como `request_id` en los logs.
   version: 1.0.0
 servers:
   - url: /

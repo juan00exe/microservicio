@@ -48,7 +48,8 @@
       "script": {
         "type": "text/javascript",
         "exec": [
-          "pm.test('Responde en menos de 2 s', () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+          "pm.test('Responde en menos de 2 s', () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+          "pm.test('Incluye X-Request-ID', () => pm.expect(pm.response.headers.get('X-Request-ID')).to.be.a('string').and.not.empty);"
         ]
       }
     }

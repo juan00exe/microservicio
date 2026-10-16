@@ -160,3 +160,21 @@ internal/product/  modelo, repositorios (memoria y PostgreSQL), servicio y handl
 ```
 
 `GET /health` también comprueba la conexión a la base de datos y devuelve 503 si no responde.
+
+## Logs y X-Request-ID
+
+Los logs salen en JSON por stdout. Cada petición lleva un ID en la cabecera `X-Request-ID`
+(se devuelve en la respuesta) y **todos** los logs de esa petición incluyen `request_id`:
+
+```json
+{"level":"ERROR","msg":"unexpected error","error":"...","request_id":"3f1c2b9e-..."}
+{"level":"INFO","msg":"request","method":"POST","path":"/products","status":500,"request_id":"3f1c2b9e-..."}
+```
+
+Si el cliente envía su propio `X-Request-ID` (hasta 128 caracteres `A-Z a-z 0-9 - _ . :`), se
+reutiliza; así se puede seguir una petición a través de varios microservicios. Para buscar los
+logs de una petición:
+
+```bash
+docker compose logs api | grep 3f1c2b9e-...
+```
