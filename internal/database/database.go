@@ -44,9 +44,26 @@ func Connect(ctx context.Context, url string, logger *slog.Logger) (*pgxpool.Poo
 	}
 }
 
+// migrationLockID identifica el advisory lock que serializa las migraciones
+// cuando arrancan varias instancias (o varios paquetes de tests) a la vez.
+const migrationLockID = 727_001
+
 // Migrate aplica en orden los archivos de migrations/ que aún no se hayan aplicado.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) error {
-	if _, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockID); err != nil {
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+	defer func() {
+		_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, migrationLockID)
+	}()
+
+	if _, err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		version    TEXT PRIMARY KEY,
 		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
 	)`); err != nil {
@@ -61,7 +78,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) error
 
 	for _, name := range names {
 		var applied bool
-		if err := pool.QueryRow(ctx,
+		if err := conn.QueryRow(ctx,
 			`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`, name,
 		).Scan(&applied); err != nil {
 			return err
@@ -74,7 +91,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) error
 		if err != nil {
 			return err
 		}
-		tx, err := pool.Begin(ctx)
+		tx, err := conn.Begin(ctx)
 		if err != nil {
 			return err
 		}

@@ -17,6 +17,20 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
+const maxBodyBytes = 1 << 20 // 1 MiB
+
+// DecodeJSON lee el cuerpo como JSON en dst, rechazando campos desconocidos y
+// cuerpos de más de 1 MiB. Si falla, responde 400 y devuelve false.
+func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		WriteError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return false
+	}
+	return true
+}
+
 // WriteError responde con un cuerpo {"error": msg}.
 func WriteError(w http.ResponseWriter, status int, msg string) {
 	WriteJSON(w, status, map[string]string{"error": msg})

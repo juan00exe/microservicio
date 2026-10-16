@@ -2,11 +2,11 @@ package product
 
 import (
 	"context"
-	"crypto/rand"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
+
+	"microservicio/internal/ids"
 )
 
 // Service contiene la lógica de negocio de productos.
@@ -62,7 +62,7 @@ func (s *Service) Create(ctx context.Context, in Input) (Product, error) {
 	}
 	now := s.now()
 	p := Product{
-		ID:          newID(),
+		ID:          ids.New(),
 		Name:        strings.TrimSpace(in.Name),
 		Description: in.Description,
 		Price:       in.Price,
@@ -97,13 +97,4 @@ func (s *Service) Update(ctx context.Context, id string, in Input) (Product, err
 
 func (s *Service) Delete(ctx context.Context, id string) error {
 	return s.repo.Delete(ctx, id)
-}
-
-// newID genera un UUID v4 usando solo la librería estándar.
-func newID() string {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }

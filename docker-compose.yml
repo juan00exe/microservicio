@@ -21,6 +21,11 @@ services:
     environment:
       PORT: "8080"
       DATABASE_URL: postgres://app:app@db:5432/productos?sslmode=disable
+      # Valores solo para desarrollo: cámbialos en cualquier entorno real.
+      JWT_SECRET: dev-secret-cambia-esto-en-produccion-0123456789
+      JWT_TTL: 1h
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: admin12345
     ports:
       - "8080:8080"
     depends_on:

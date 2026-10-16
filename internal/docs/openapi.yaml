@@ -1,13 +1,19 @@
 openapi: 3.0.3
 info:
   title: Microservicio de productos
-  description: CRUD REST de productos.
+  description: |
+    CRUD REST de productos con autenticación JWT.
+
+    Las lecturas son públicas. Para crear, editar o borrar productos hace falta un token de **admin**:
+    haz login en `POST /auth/login`, copia `access_token` y pégalo en **Authorize**.
   version: 1.0.0
 servers:
   - url: /
-# La API no requiere autenticación.
+# Por defecto las operaciones son públicas; las protegidas declaran bearerAuth.
 security: []
 tags:
+  - name: auth
+    description: Registro, login y perfil
   - name: products
     description: Gestión de productos
   - name: health
@@ -36,6 +42,61 @@ paths:
                 properties:
                   status: { type: string, example: unavailable }
                   database: { type: string, example: down }
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Registrar usuario
+      operationId: register
+      description: Crea una cuenta con rol **user** (solo lectura de productos).
+      requestBody:
+        $ref: "#/components/requestBodies/Credentials"
+      responses:
+        "201":
+          description: Usuario creado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409":
+          description: El email ya está registrado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: email already registered }
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Iniciar sesión
+      operationId: login
+      requestBody:
+        $ref: "#/components/requestBodies/Credentials"
+      responses:
+        "200":
+          description: Login correcto
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Token" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: Email o contraseña incorrectos
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: invalid email or password }
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Usuario actual
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Datos del usuario del token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /products:
     get:
       tags: [products]
@@ -66,6 +127,9 @@ paths:
       tags: [products]
       summary: Crear producto
       operationId: createProduct
+      description: Requiere rol admin.
+      security:
+        - bearerAuth: []
       requestBody:
         $ref: "#/components/requestBodies/ProductInput"
       responses:
@@ -79,6 +143,8 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Product" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /products/{id}:
     parameters:
       - name: id
@@ -101,7 +167,9 @@ paths:
       tags: [products]
       summary: Actualizar producto
       operationId: updateProduct
-      description: Reemplaza todos los campos editables del producto.
+      description: Reemplaza todos los campos editables del producto. Requiere rol admin.
+      security:
+        - bearerAuth: []
       requestBody:
         $ref: "#/components/requestBodies/ProductInput"
       responses:
@@ -111,17 +179,49 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Product" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [products]
       summary: Borrar producto
       operationId: deleteProduct
+      description: Requiere rol admin.
+      security:
+        - bearerAuth: []
       responses:
         "204":
           description: Producto borrado
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
+    Credentials:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, example: admin@example.com }
+        password: { type: string, format: password, minLength: 8, maxLength: 72, example: admin12345 }
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email, example: ana@example.com }
+        role: { type: string, enum: [admin, user], example: user }
+        created_at: { type: string, format: date-time }
+    Token:
+      type: object
+      properties:
+        access_token: { type: string, example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... }
+        token_type: { type: string, example: Bearer }
+        expires_in: { type: integer, description: Segundos hasta que el token expira, example: 3600 }
     Product:
       type: object
       properties:
@@ -156,6 +256,11 @@ components:
       properties:
         error: { type: string }
   requestBodies:
+    Credentials:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Credentials" }
     ProductInput:
       required: true
       content:
@@ -174,3 +279,18 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
           example: { error: product not found }
+    Unauthorized:
+      description: Falta el token o no es válido / ha expirado
+      headers:
+        WWW-Authenticate:
+          schema: { type: string, example: Bearer realm="microservicio" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: missing bearer token }
+    Forbidden:
+      description: El token es válido pero el usuario no es admin
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: requires role admin }

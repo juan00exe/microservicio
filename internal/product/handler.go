@@ -1,7 +1,6 @@
 package product
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -10,8 +9,6 @@ import (
 
 	"microservicio/internal/httpx"
 )
-
-const maxBodyBytes = 1 << 20 // 1 MiB
 
 // Handler expone el servicio de productos por HTTP.
 type Handler struct {
@@ -23,13 +20,14 @@ func NewHandler(svc *Service, logger *slog.Logger) *Handler {
 	return &Handler{svc: svc, logger: logger}
 }
 
-// RegisterRoutes registra las rutas de productos en el mux.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+// RegisterRoutes registra las rutas de productos en el mux. Las lecturas son
+// públicas; las escrituras pasan por protect (p. ej. exigir un token de admin).
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, protect func(http.Handler) http.Handler) {
 	mux.HandleFunc("GET /products", h.list)
-	mux.HandleFunc("POST /products", h.create)
 	mux.HandleFunc("GET /products/{id}", h.get)
-	mux.HandleFunc("PUT /products/{id}", h.update)
-	mux.HandleFunc("DELETE /products/{id}", h.delete)
+	mux.Handle("POST /products", protect(http.HandlerFunc(h.create)))
+	mux.Handle("PUT /products/{id}", protect(http.HandlerFunc(h.update)))
+	mux.Handle("DELETE /products/{id}", protect(http.HandlerFunc(h.delete)))
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -107,13 +105,8 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 
 func decodeInput(w http.ResponseWriter, r *http.Request) (Input, bool) {
 	var in Input
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&in); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
-		return Input{}, false
-	}
-	return in, true
+	ok := httpx.DecodeJSON(w, r, &in)
+	return in, ok
 }
 
 func (h *Handler) writeErr(w http.ResponseWriter, err error) {

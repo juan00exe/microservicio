@@ -24,9 +24,15 @@ func forEachRepo(t *testing.T, fn func(t *testing.T, srv *httptest.Server)) {
 
 func newTestServer(t *testing.T, repo Repository) *httptest.Server {
 	t.Helper()
+	// Sin protección: la autenticación se prueba en el paquete auth y en TestWriteRoutesAreProtected.
+	return newTestServerWith(t, repo, func(h http.Handler) http.Handler { return h })
+}
+
+func newTestServerWith(t *testing.T, repo Repository, protect func(http.Handler) http.Handler) *httptest.Server {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	mux := http.NewServeMux()
-	NewHandler(NewService(repo), logger).RegisterRoutes(mux)
+	NewHandler(NewService(repo), logger).RegisterRoutes(mux, protect)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv
@@ -198,4 +204,23 @@ func TestListPagination(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestWriteRoutesAreProtected(t *testing.T) {
+	denyAll := func(http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+		})
+	}
+	srv := newTestServerWith(t, NewMemoryRepository(), denyAll)
+	id := "00000000-0000-4000-8000-000000000000"
+
+	// Las lecturas son públicas.
+	expectStatus(t, do(t, http.MethodGet, srv.URL+"/products", ""), http.StatusOK)
+	expectStatus(t, do(t, http.MethodGet, srv.URL+"/products/"+id, ""), http.StatusNotFound)
+
+	// Las escrituras pasan por protect.
+	expectStatus(t, do(t, http.MethodPost, srv.URL+"/products", `{"name":"x"}`), http.StatusUnauthorized)
+	expectStatus(t, do(t, http.MethodPut, srv.URL+"/products/"+id, `{"name":"x"}`), http.StatusUnauthorized)
+	expectStatus(t, do(t, http.MethodDelete, srv.URL+"/products/"+id, ""), http.StatusUnauthorized)
 }
