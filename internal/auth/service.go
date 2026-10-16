@@ -18,15 +18,39 @@ type Token struct {
 	ExpiresIn   int    `json:"expires_in"` // segundos
 }
 
+// LoginLimits configura el bloqueo por logins fallidos. Un máximo de 0 desactiva ese límite.
+type LoginLimits struct {
+	MaxPerEmail int           // fallos por email antes de bloquear esa cuenta
+	MaxPerIP    int           // fallos por IP (con cualquier email) antes de bloquear esa IP
+	Lockout     time.Duration // ventana en la que se cuentan los fallos y duración del bloqueo
+}
+
+// TooManyAttemptsError indica que el login está bloqueado temporalmente.
+type TooManyAttemptsError struct {
+	RetryAfter time.Duration
+}
+
+func (e *TooManyAttemptsError) Error() string {
+	return "too many failed login attempts, try again later"
+}
+
 // Service contiene la lógica de registro y login.
 type Service struct {
 	repo       Repository
 	tokens     *TokenManager
 	bcryptCost int
+	byEmail    *Limiter
+	byIP       *Limiter
 }
 
-func NewService(repo Repository, tokens *TokenManager) *Service {
-	return &Service{repo: repo, tokens: tokens, bcryptCost: bcrypt.DefaultCost}
+func NewService(repo Repository, tokens *TokenManager, limits LoginLimits) *Service {
+	return &Service{
+		repo:       repo,
+		tokens:     tokens,
+		bcryptCost: bcrypt.DefaultCost,
+		byEmail:    NewLimiter(limits.MaxPerEmail, limits.Lockout),
+		byIP:       NewLimiter(limits.MaxPerIP, limits.Lockout),
+	}
 }
 
 // Register crea una cuenta con rol user.
@@ -63,25 +87,50 @@ var dummyHash = sync.OnceValue(func() []byte {
 	return h
 })
 
-// Login comprueba las credenciales y emite un JWT.
-func (s *Service) Login(ctx context.Context, c Credentials) (Token, error) {
+// Login comprueba las credenciales y emite un JWT. Tras demasiados fallos
+// devuelve *TooManyAttemptsError, incluso si la contraseña es correcta.
+func (s *Service) Login(ctx context.Context, c Credentials, clientIP string) (Token, error) {
 	c = c.normalized()
-	u, err := s.repo.GetByEmail(ctx, c.Email)
-	if errors.Is(err, ErrNotFound) {
-		_ = bcrypt.CompareHashAndPassword(dummyHash(), []byte(c.Password))
-		return Token{}, ErrInvalidCredentials
+	if wait := max(s.byEmail.Blocked(c.Email), s.byIP.Blocked(clientIP)); wait > 0 {
+		return Token{}, &TooManyAttemptsError{RetryAfter: wait}
+	}
+
+	u, err := s.authenticate(ctx, c)
+	if errors.Is(err, ErrInvalidCredentials) {
+		s.byEmail.Fail(c.Email)
+		if clientIP != "" {
+			s.byIP.Fail(clientIP)
+		}
+		return Token{}, err
 	}
 	if err != nil {
 		return Token{}, err
 	}
-	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(c.Password)) != nil {
-		return Token{}, ErrInvalidCredentials
-	}
+	// El contador de la IP no se reinicia: si no, un atacante con una cuenta
+	// válida podría intercalar logins correctos para probar otras cuentas.
+	s.byEmail.Reset(c.Email)
+
 	tok, err := s.tokens.Issue(u)
 	if err != nil {
 		return Token{}, err
 	}
 	return Token{AccessToken: tok, TokenType: "Bearer", ExpiresIn: int(s.tokens.TTL().Seconds())}, nil
+}
+
+// authenticate devuelve el usuario si email y contraseña coinciden.
+func (s *Service) authenticate(ctx context.Context, c Credentials) (User, error) {
+	u, err := s.repo.GetByEmail(ctx, c.Email)
+	if errors.Is(err, ErrNotFound) {
+		_ = bcrypt.CompareHashAndPassword(dummyHash(), []byte(c.Password))
+		return User{}, ErrInvalidCredentials
+	}
+	if err != nil {
+		return User{}, err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(c.Password)) != nil {
+		return User{}, ErrInvalidCredentials
+	}
+	return u, nil
 }
 
 // Get devuelve un usuario por id.

@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -23,6 +24,11 @@ type Config struct {
 	// admin al arrancar cuando todavía no existe.
 	AdminEmail    string
 	AdminPassword string
+
+	// Bloqueo de login por intentos fallidos (0 desactiva ese límite).
+	LoginMaxPerEmail int
+	LoginMaxPerIP    int
+	LoginLockout     time.Duration
 }
 
 // Load lee la configuración desde el entorno aplicando valores por defecto.
@@ -39,7 +45,31 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("JWT_TTL must be a positive duration like 15m or 1h")
 	}
 	cfg.JWTTTL = ttl
+
+	if cfg.LoginMaxPerEmail, err = intEnv("LOGIN_MAX_ATTEMPTS", 5); err != nil {
+		return Config{}, err
+	}
+	if cfg.LoginMaxPerIP, err = intEnv("LOGIN_MAX_ATTEMPTS_PER_IP", 20); err != nil {
+		return Config{}, err
+	}
+	lockout, err := time.ParseDuration(getEnv("LOGIN_LOCKOUT", "15m"))
+	if err != nil || lockout <= 0 {
+		return Config{}, fmt.Errorf("LOGIN_LOCKOUT must be a positive duration like 15m")
+	}
+	cfg.LoginLockout = lockout
 	return cfg, nil
+}
+
+func intEnv(key string, fallback int) (int, error) {
+	v := getEnv(key, "")
+	if v == "" {
+		return fallback, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative integer", key)
+	}
+	return n, nil
 }
 
 func getEnv(key, fallback string) string {

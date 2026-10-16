@@ -14,6 +14,9 @@ almacenamiento en memoria.
 | `JWT_TTL`        | `1h`        | Duración de los tokens (`15m`, `1h`, `24h`…)                       |
 | `ADMIN_EMAIL`    | (vacía)     | Junto con `ADMIN_PASSWORD`, crea la cuenta admin al arrancar si no existe |
 | `ADMIN_PASSWORD` | (vacía)     | Contraseña de esa cuenta admin                                     |
+| `LOGIN_MAX_ATTEMPTS` | `5`     | Logins fallidos por email antes de bloquear esa cuenta (0 = sin límite) |
+| `LOGIN_MAX_ATTEMPTS_PER_IP` | `20` | Logins fallidos por IP, con cualquier email, antes de bloquear esa IP (0 = sin límite) |
+| `LOGIN_LOCKOUT`  | `15m`       | Ventana en la que se cuentan los fallos y duración del bloqueo     |
 
 docker-compose trae valores de desarrollo (admin `admin@example.com` / `admin12345`). **Cámbialos
 en cualquier entorno real** y usa un `JWT_SECRET` largo y aleatorio, por ejemplo `openssl rand -base64 48`.
@@ -70,6 +73,13 @@ Swagger UI se carga desde el CDN de jsDelivr, así que el navegador necesita int
 - Envía el token en la cabecera `Authorization: Bearer <access_token>`.
 - Sin token o con token inválido/expirado → **401**; con token de user en una ruta de admin → **403**.
 - El rol va dentro del token: si cambia el rol de alguien, se aplica cuando vuelva a hacer login.
+- **Bloqueo por intentos fallidos:** 5 logins fallidos con un email (o 20 desde una IP) en 15 minutos
+  bloquean ese email (o esa IP) durante 15 minutos → **429** con cabecera `Retry-After`, aunque la
+  contraseña sea correcta. Un login correcto reinicia el contador del email.
+  - Los contadores viven en memoria: se reinician al reiniciar el servicio y, con varias
+    instancias, cada una lleva su cuenta.
+  - La IP es la de la conexión. Detrás de un proxy o balanceador todos los clientes compartirían
+    la IP del proxy, así que habría que adaptar `clientIP` para leer la cabecera del proxy.
 
 ```bash
 TOKEN=$(curl -s localhost:8080/auth/login -d '{"email":"admin@example.com","password":"admin12345"}' | jq -r .access_token)

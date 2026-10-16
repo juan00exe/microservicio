@@ -66,7 +66,11 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	authSvc := auth.NewService(userRepo, tokens)
+	authSvc := auth.NewService(userRepo, tokens, auth.LoginLimits{
+		MaxPerEmail: cfg.LoginMaxPerEmail,
+		MaxPerIP:    cfg.LoginMaxPerIP,
+		Lockout:     cfg.LoginLockout,
+	})
 	if err := ensureAdmin(ctx, authSvc, cfg, logger); err != nil {
 		return err
 	}

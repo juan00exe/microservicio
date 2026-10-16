@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -32,11 +33,19 @@ func forEachRepo(t *testing.T, fn func(t *testing.T, env testEnv)) {
 	})
 }
 
+// noLimits desactiva el bloqueo de login para los tests que no lo prueban.
+var noLimits = LoginLimits{}
+
 // newTestEnv monta las rutas /auth y una ruta /admin-only protegida con RequireRole.
 func newTestEnv(t *testing.T, repo Repository) testEnv {
 	t.Helper()
+	return newTestEnvWithLimits(t, repo, noLimits)
+}
+
+func newTestEnvWithLimits(t *testing.T, repo Repository, limits LoginLimits) testEnv {
+	t.Helper()
 	tokens := newTestTokens(t)
-	svc := NewService(repo, tokens)
+	svc := NewService(repo, tokens, limits)
 	svc.bcryptCost = bcrypt.MinCost // tests rápidos
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -208,5 +217,55 @@ func TestProtectedRouteWithoutValidToken(t *testing.T) {
 				t.Fatal("missing WWW-Authenticate header")
 			}
 		})
+	}
+}
+
+func TestLoginLockoutByEmail(t *testing.T) {
+	env := newTestEnvWithLimits(t, NewMemoryRepository(), LoginLimits{MaxPerEmail: 3, Lockout: 15 * time.Minute})
+	url := env.srv.URL
+	for _, email := range []string{"ana@example.com", "bob@example.com"} {
+		resp, body := request(t, http.MethodPost, url+"/auth/register", "", `{"email":"`+email+`","password":"secreto123"}`)
+		wantStatus(t, resp, body, http.StatusCreated)
+	}
+	wrong := `{"email":"ana@example.com","password":"incorrecta"}`
+
+	// Dos fallos y un login correcto: el contador se reinicia.
+	for range 2 {
+		resp, body := request(t, http.MethodPost, url+"/auth/login", "", wrong)
+		wantStatus(t, resp, body, http.StatusUnauthorized)
+	}
+	login(t, env, "ana@example.com", "secreto123")
+
+	// Tres fallos seguidos bloquean la cuenta.
+	for range 3 {
+		resp, body := request(t, http.MethodPost, url+"/auth/login", "", wrong)
+		wantStatus(t, resp, body, http.StatusUnauthorized)
+	}
+	// Bloqueada aunque la contraseña sea correcta, y sin importar mayúsculas.
+	resp, body := request(t, http.MethodPost, url+"/auth/login", "", `{"email":"ANA@example.com","password":"secreto123"}`)
+	wantStatus(t, resp, body, http.StatusTooManyRequests)
+	if got := resp.Header.Get("Retry-After"); got != "900" {
+		t.Fatalf("Retry-After = %q, want 900", got)
+	}
+
+	// Las demás cuentas siguen funcionando.
+	login(t, env, "bob@example.com", "secreto123")
+}
+
+func TestLoginLockoutByIP(t *testing.T) {
+	env := newTestEnvWithLimits(t, NewMemoryRepository(), LoginLimits{MaxPerIP: 3, Lockout: time.Minute})
+	url := env.srv.URL
+	resp, body := request(t, http.MethodPost, url+"/auth/register", "", `{"email":"ana@example.com","password":"secreto123"}`)
+	wantStatus(t, resp, body, http.StatusCreated)
+
+	// Fallos con emails distintos desde la misma IP (todas las peticiones del test vienen de 127.0.0.1).
+	for _, email := range []string{"a@example.com", "b@example.com", "c@example.com"} {
+		resp, body := request(t, http.MethodPost, url+"/auth/login", "", `{"email":"`+email+`","password":"incorrecta"}`)
+		wantStatus(t, resp, body, http.StatusUnauthorized)
+	}
+	resp, body = request(t, http.MethodPost, url+"/auth/login", "", `{"email":"ana@example.com","password":"secreto123"}`)
+	wantStatus(t, resp, body, http.StatusTooManyRequests)
+	if resp.Header.Get("Retry-After") == "" {
+		t.Fatal("missing Retry-After header")
 	}
 }

@@ -3,7 +3,10 @@ package auth
 import (
 	"errors"
 	"log/slog"
+	"math"
+	"net"
 	"net/http"
+	"strconv"
 
 	"microservicio/internal/httpx"
 )
@@ -44,7 +47,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &c) {
 		return
 	}
-	tok, err := h.svc.Login(r.Context(), c)
+	tok, err := h.svc.Login(r.Context(), c, clientIP(r))
 	if err != nil {
 		h.writeErr(w, err)
 		return
@@ -68,7 +71,23 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, u)
 }
 
+// clientIP devuelve la IP de la conexión. No usa X-Forwarded-For: cualquier
+// cliente puede falsearla, así que solo sería fiable detrás de un proxy conocido.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
 func (h *Handler) writeErr(w http.ResponseWriter, err error) {
+	if tooMany, ok := errors.AsType[*TooManyAttemptsError](err); ok {
+		secs := int(math.Ceil(tooMany.RetryAfter.Seconds()))
+		w.Header().Set("Retry-After", strconv.Itoa(secs))
+		httpx.WriteError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
 	switch {
 	case errors.Is(err, ErrInvalid):
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
