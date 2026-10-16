@@ -1,0 +1,153 @@
+openapi: 3.0.3
+info:
+  title: Microservicio de productos
+  description: CRUD REST de productos.
+  version: 1.0.0
+servers:
+  - url: /
+# La API no requiere autenticación.
+security: []
+tags:
+  - name: products
+    description: Gestión de productos
+  - name: health
+    description: Estado del servicio
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Estado del servicio y de la base de datos
+      operationId: getHealth
+      responses:
+        "200":
+          description: Servicio operativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+        "503":
+          description: La base de datos no responde
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: unavailable }
+                  database: { type: string, example: down }
+  /products:
+    get:
+      tags: [products]
+      summary: Listar productos
+      operationId: listProducts
+      responses:
+        "200":
+          description: Lista de productos ordenada por fecha de creación
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Product" }
+    post:
+      tags: [products]
+      summary: Crear producto
+      operationId: createProduct
+      requestBody:
+        $ref: "#/components/requestBodies/ProductInput"
+      responses:
+        "201":
+          description: Producto creado
+          headers:
+            Location:
+              description: URL del nuevo producto
+              schema: { type: string, example: /products/3f1c2b9e-8a4d-4c1e-9b7a-2d5e6f708192 }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /products/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: ID del producto (UUID)
+        schema: { type: string, format: uuid }
+    get:
+      tags: [products]
+      summary: Obtener producto
+      operationId: getProduct
+      responses:
+        "200":
+          description: Producto encontrado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [products]
+      summary: Actualizar producto
+      operationId: updateProduct
+      description: Reemplaza todos los campos editables del producto.
+      requestBody:
+        $ref: "#/components/requestBodies/ProductInput"
+      responses:
+        "200":
+          description: Producto actualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [products]
+      summary: Borrar producto
+      operationId: deleteProduct
+      responses:
+        "204":
+          description: Producto borrado
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  schemas:
+    Product:
+      type: object
+      properties:
+        id: { type: string, format: uuid, example: 3f1c2b9e-8a4d-4c1e-9b7a-2d5e6f708192 }
+        name: { type: string, example: Teclado }
+        description: { type: string, example: Teclado mecánico }
+        price: { type: number, format: double, example: 49.9 }
+        stock: { type: integer, example: 10 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ProductInput:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, example: Teclado }
+        description: { type: string, example: Teclado mecánico }
+        price: { type: number, format: double, minimum: 0, example: 49.9 }
+        stock: { type: integer, minimum: 0, example: 10 }
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+  requestBodies:
+    ProductInput:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ProductInput" }
+  responses:
+    BadRequest:
+      description: Cuerpo inválido o datos que no cumplen la validación
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: name is required }
+    NotFound:
+      description: El producto no existe
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: product not found }
