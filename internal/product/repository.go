@@ -10,7 +10,8 @@ import (
 // Repository abstrae el almacenamiento de productos para poder sustituirlo
 // por una base de datos real sin tocar el servicio ni los handlers.
 type Repository interface {
-	List(ctx context.Context) ([]Product, error)
+	// List devuelve la página pedida y el total de productos que cumplen el filtro.
+	List(ctx context.Context, params ListParams) ([]Product, int, error)
 	Get(ctx context.Context, id string) (Product, error)
 	Create(ctx context.Context, p Product) error
 	Update(ctx context.Context, p Product) error
@@ -27,21 +28,28 @@ func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{items: make(map[string]Product)}
 }
 
-func (r *MemoryRepository) List(_ context.Context) ([]Product, error) {
+func (r *MemoryRepository) List(_ context.Context, params ListParams) ([]Product, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	out := make([]Product, 0, len(r.items))
+	name := strings.ToLower(params.Name)
+	matches := make([]Product, 0, len(r.items))
 	for _, p := range r.items {
-		out = append(out, p)
+		if name == "" || strings.Contains(strings.ToLower(p.Name), name) {
+			matches = append(matches, p)
+		}
 	}
-	// Orden estable para respuestas predecibles.
-	slices.SortFunc(out, func(a, b Product) int {
+	// Orden estable para que las páginas no se solapen.
+	slices.SortFunc(matches, func(a, b Product) int {
 		if c := a.CreatedAt.Compare(b.CreatedAt); c != 0 {
 			return c
 		}
 		return strings.Compare(a.ID, b.ID)
 	})
-	return out, nil
+
+	total := len(matches)
+	start := min(params.Offset(), total)
+	end := min(start+params.Limit, total)
+	return matches[start:end], total, nil
 }
 
 func (r *MemoryRepository) Get(_ context.Context, id string) (Product, error) {

@@ -5,23 +5,51 @@ import (
 	"crypto/rand"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
 // Service contiene la lógica de negocio de productos.
 type Service struct {
 	repo Repository
-	now  func() time.Time
+
+	mu   sync.Mutex
+	last time.Time
 }
 
 func NewService(repo Repository) *Service {
-	// Se trunca a microsegundos, la precisión de TIMESTAMPTZ en PostgreSQL,
-	// para que lo devuelto al crear coincida con lo leído después.
-	return &Service{repo: repo, now: func() time.Time { return time.Now().UTC().Truncate(time.Microsecond) }}
+	return &Service{repo: repo}
 }
 
-func (s *Service) List(ctx context.Context) ([]Product, error) {
-	return s.repo.List(ctx)
+// now devuelve la hora actual en UTC truncada a microsegundos (la precisión de
+// TIMESTAMPTZ en PostgreSQL) y estrictamente creciente dentro de este proceso,
+// para que el listado por fecha de creación respete el orden de inserción.
+func (s *Service) now() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t := time.Now().UTC().Truncate(time.Microsecond)
+	if !t.After(s.last) {
+		t = s.last.Add(time.Microsecond)
+	}
+	s.last = t
+	return t
+}
+
+func (s *Service) List(ctx context.Context, params ListParams) (Page, error) {
+	if err := params.Validate(); err != nil {
+		return Page{}, err
+	}
+	items, total, err := s.repo.List(ctx, params)
+	if err != nil {
+		return Page{}, err
+	}
+	return Page{
+		Items:      items,
+		Page:       params.Page,
+		Limit:      params.Limit,
+		Total:      total,
+		TotalPages: (total + params.Limit - 1) / params.Limit,
+	}, nil
 }
 
 func (s *Service) Get(ctx context.Context, id string) (Product, error) {

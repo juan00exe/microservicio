@@ -3,6 +3,7 @@ package product
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -31,7 +32,43 @@ type Input struct {
 	Stock       int     `json:"stock"`
 }
 
-// ValidationError describe por qué un Input no es válido.
+const (
+	DefaultLimit = 20
+	MaxLimit     = 100
+)
+
+// ListParams define la página pedida y el filtro opcional por nombre.
+type ListParams struct {
+	Page  int
+	Limit int
+	// Name filtra por nombre (contiene, sin distinguir mayúsculas). Vacío = sin filtro.
+	Name string
+}
+
+// Offset es el número de productos que se saltan antes de la página pedida.
+func (p ListParams) Offset() int { return (p.Page - 1) * p.Limit }
+
+// Validate comprueba que la página y el límite estén en rango.
+func (p ListParams) Validate() error {
+	switch {
+	case p.Page < 1:
+		return &ValidationError{Msg: "page must be >= 1"}
+	case p.Limit < 1 || p.Limit > MaxLimit:
+		return &ValidationError{Msg: fmt.Sprintf("limit must be between 1 and %d", MaxLimit)}
+	}
+	return nil
+}
+
+// Page es una página de resultados junto con los datos para navegar entre páginas.
+type Page struct {
+	Items      []Product `json:"items"`
+	Page       int       `json:"page"`
+	Limit      int       `json:"limit"`
+	Total      int       `json:"total"`
+	TotalPages int       `json:"total_pages"`
+}
+
+// ValidationError describe por qué los datos recibidos no son válidos.
 type ValidationError struct {
 	Msg string
 }

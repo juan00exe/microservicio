@@ -41,14 +41,27 @@ paths:
       tags: [products]
       summary: Listar productos
       operationId: listProducts
+      description: Devuelve los productos paginados, ordenados por fecha de creación.
+      parameters:
+        - name: page
+          in: query
+          description: Número de página (empieza en 1)
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          description: Productos por página
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: name
+          in: query
+          description: Filtra por nombre (contiene el texto, sin distinguir mayúsculas)
+          schema: { type: string, example: teclado }
       responses:
         "200":
-          description: Lista de productos ordenada por fecha de creación
+          description: Página de productos
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/Product" }
+              schema: { $ref: "#/components/schemas/ProductPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
     post:
       tags: [products]
       summary: Crear producto
@@ -119,6 +132,16 @@ components:
         stock: { type: integer, example: 10 }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    ProductPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Product" }
+        page: { type: integer, example: 1 }
+        limit: { type: integer, example: 20 }
+        total: { type: integer, description: Total de productos que cumplen el filtro, example: 42 }
+        total_pages: { type: integer, example: 3 }
     ProductInput:
       type: object
       additionalProperties: false

@@ -31,10 +31,16 @@ DATABASE_URL="postgres://app:app@localhost:5432/productos?sslmode=disable" go ru
 
 ```bash
 go test ./...   # solo memoria
-TEST_DATABASE_URL="postgres://app:app@localhost:5432/productos?sslmode=disable" go test ./...   # también PostgreSQL
+TEST_DATABASE_URL="postgres://app:app@localhost:5432/productos_test?sslmode=disable" go test ./...   # también PostgreSQL
 ```
 
-Los tests de PostgreSQL vacían la tabla `products`; usa una base de datos de pruebas.
+Los tests de PostgreSQL **vacían la tabla `products`**, así que usan su propia base de datos
+`productos_test` (nunca apuntes `TEST_DATABASE_URL` a `productos`). docker-compose la crea al
+inicializar un volumen nuevo; si tu volumen es anterior, créala una vez con:
+
+```bash
+docker compose exec db createdb -U app productos_test
+```
 
 ## Documentación interactiva (Swagger UI)
 
@@ -60,12 +66,28 @@ Cuerpo para POST/PUT:
 { "name": "Teclado", "description": "Mecánico", "price": 49.9, "stock": 10 }
 ```
 
+### Paginación y filtro
+
+`GET /products` acepta `page` (desde 1, por defecto 1), `limit` (1–100, por defecto 20) y
+`name` (contiene el texto, sin distinguir mayúsculas). Valores fuera de rango devuelven 400.
+
+```json
+{
+  "items": [ { "id": "…", "name": "Teclado", "...": "…" } ],
+  "page": 1,
+  "limit": 20,
+  "total": 42,
+  "total_pages": 3
+}
+```
+
 ## Ejemplos
 
 ```bash
 curl -X POST localhost:8080/products -H "Content-Type: application/json" \
   -d '{"name":"Teclado","price":49.9,"stock":10}'
 curl localhost:8080/products
+curl "localhost:8080/products?page=2&limit=10&name=teclado"
 curl -X PUT localhost:8080/products/<id> -d '{"name":"Teclado","price":39.9,"stock":8}'
 curl -X DELETE localhost:8080/products/<id>
 ```

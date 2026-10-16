@@ -3,6 +3,8 @@ package product
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -20,20 +22,40 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 
 const selectColumns = `id, name, description, price, stock, created_at, updated_at`
 
-func (r *PostgresRepository) List(ctx context.Context) ([]Product, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+selectColumns+` FROM products ORDER BY created_at, id`)
+func (r *PostgresRepository) List(ctx context.Context, params ListParams) ([]Product, int, error) {
+	where := ""
+	args := []any{}
+	if params.Name != "" {
+		where = ` WHERE name ILIKE '%' || $1 || '%' ESCAPE '\'`
+		args = append(args, escapeLike(params.Name))
+	}
+
+	var total int
+	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM products`+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	n := len(args)
+	query := fmt.Sprintf(`SELECT %s FROM products%s ORDER BY created_at, id LIMIT $%d OFFSET $%d`,
+		selectColumns, where, n+1, n+2)
+	rows, err := r.pool.Query(ctx, query, append(args, params.Limit, params.Offset())...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	out, err := pgx.CollectRows(rows, scanProduct)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if out == nil {
 		out = []Product{}
 	}
-	return out, nil
+	return out, total, nil
 }
+
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// escapeLike escapa los comodines de LIKE para que el filtro busque el texto literal.
+func escapeLike(s string) string { return likeEscaper.Replace(s) }
 
 func (r *PostgresRepository) Get(ctx context.Context, id string) (Product, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+selectColumns+` FROM products WHERE id = $1`, id)

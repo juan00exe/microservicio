@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"microservicio/internal/httpx"
 )
@@ -31,12 +33,32 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	items, err := h.svc.List(r.Context())
+	q := r.URL.Query()
+	params := ListParams{Name: strings.TrimSpace(q.Get("name"))}
+	var err error
+	if params.Page, err = intParam(q.Get("page"), 1); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "page must be an integer")
+		return
+	}
+	if params.Limit, err = intParam(q.Get("limit"), DefaultLimit); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "limit must be an integer")
+		return
+	}
+
+	page, err := h.svc.List(r.Context(), params)
 	if err != nil {
 		h.writeErr(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, items)
+	httpx.WriteJSON(w, http.StatusOK, page)
+}
+
+// intParam convierte un parámetro de query a entero, usando def si viene vacío.
+func intParam(s string, def int) (int, error) {
+	if s == "" {
+		return def, nil
+	}
+	return strconv.Atoi(s)
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {

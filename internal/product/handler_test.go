@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -81,8 +82,8 @@ func TestCRUD(t *testing.T) {
 		// Listar
 		resp = do(t, http.MethodGet, srv.URL+"/products", "")
 		expectStatus(t, resp, http.StatusOK)
-		if list := decode[[]Product](t, resp); len(list) != 1 {
-			t.Fatalf("len(list) = %d, want 1", len(list))
+		if page := decode[Page](t, resp); len(page.Items) != 1 || page.Total != 1 {
+			t.Fatalf("unexpected page: %+v", page)
 		}
 
 		// Obtener
@@ -133,6 +134,67 @@ func TestValidation(t *testing.T) {
 				if e := decode[map[string]string](t, resp); e["error"] == "" {
 					t.Fatal("missing error message")
 				}
+			})
+		}
+	})
+}
+
+func TestListPagination(t *testing.T) {
+	forEachRepo(t, func(t *testing.T, srv *httptest.Server) {
+		names := []string{"Teclado 1", "Mouse", "teclado 2", "Monitor", "TECLADO 3", "Teclado_4", "Cable 100%"}
+		for _, n := range names {
+			expectStatus(t, do(t, http.MethodPost, srv.URL+"/products", `{"name":"`+n+`","price":1}`), http.StatusCreated)
+		}
+
+		list := func(t *testing.T, query string) Page {
+			t.Helper()
+			resp := do(t, http.MethodGet, srv.URL+"/products"+query, "")
+			expectStatus(t, resp, http.StatusOK)
+			return decode[Page](t, resp)
+		}
+		itemNames := func(p Page) []string {
+			out := make([]string, len(p.Items))
+			for i, it := range p.Items {
+				out[i] = it.Name
+			}
+			return out
+		}
+
+		cases := []struct {
+			query                string
+			wantNames            []string
+			wantPage, wantLimit  int
+			wantTotal, wantPages int
+		}{
+			{"", names, 1, DefaultLimit, 7, 1},
+			{"?limit=3", names[0:3], 1, 3, 7, 3},
+			{"?limit=3&page=2", names[3:6], 2, 3, 7, 3},
+			{"?limit=3&page=3", names[6:7], 3, 3, 7, 3},
+			{"?limit=3&page=4", []string{}, 4, 3, 7, 3},
+			// El filtro no distingue mayúsculas.
+			{"?name=teclado", []string{"Teclado 1", "teclado 2", "TECLADO 3", "Teclado_4"}, 1, DefaultLimit, 4, 1},
+			{"?name=TECLADO&limit=2&page=2", []string{"TECLADO 3", "Teclado_4"}, 2, 2, 4, 2},
+			// Los comodines de LIKE se buscan como texto literal.
+			{"?name=_", []string{"Teclado_4"}, 1, DefaultLimit, 1, 1},
+			{"?name=%25", []string{"Cable 100%"}, 1, DefaultLimit, 1, 1},
+			{"?name=nada", []string{}, 1, DefaultLimit, 0, 0},
+		}
+		for _, c := range cases {
+			t.Run(c.query, func(t *testing.T) {
+				p := list(t, c.query)
+				if got := itemNames(p); !slices.Equal(got, c.wantNames) {
+					t.Errorf("items = %q, want %q", got, c.wantNames)
+				}
+				if p.Page != c.wantPage || p.Limit != c.wantLimit || p.Total != c.wantTotal || p.TotalPages != c.wantPages {
+					t.Errorf("page=%d limit=%d total=%d total_pages=%d, want %d %d %d %d",
+						p.Page, p.Limit, p.Total, p.TotalPages, c.wantPage, c.wantLimit, c.wantTotal, c.wantPages)
+				}
+			})
+		}
+
+		for _, q := range []string{"?page=0", "?page=-1", "?page=abc", "?limit=0", "?limit=101", "?limit=x"} {
+			t.Run("invalid "+q, func(t *testing.T) {
+				expectStatus(t, do(t, http.MethodGet, srv.URL+"/products"+q, ""), http.StatusBadRequest)
 			})
 		}
 	})
